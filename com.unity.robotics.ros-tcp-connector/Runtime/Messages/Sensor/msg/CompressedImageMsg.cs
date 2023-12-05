@@ -24,7 +24,7 @@ namespace RosMessageTypes.Sensor
         public string format;
         //  Specifies the format of the data
         //    Acceptable values:
-        //      jpeg, png
+        //      jpeg, png, tiff
         public byte[] data;
         //  Compressed image buffer
 
