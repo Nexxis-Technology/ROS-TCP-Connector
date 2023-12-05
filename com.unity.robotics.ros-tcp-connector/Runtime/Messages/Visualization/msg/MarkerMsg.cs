@@ -46,8 +46,8 @@ namespace RosMessageTypes.Visualization
         //  Action to take; one of:
         //   - 0 add/modify an object
         //   - 1 (deprecated)
-        //   - 2 deletes an object
-        //   - 3 deletes all objects
+        //   - 2 deletes an object (with the given ns and id)
+        //   - 3 deletes all objects (or those with the given ns if any)
         public int action;
         //  Pose of the object with respect the frame_id specified in the header.
         public Geometry.PoseMsg pose;
@@ -66,10 +66,25 @@ namespace RosMessageTypes.Visualization
         //  The number of colors provided must either be 0 or equal to the number of points provided.
         //  NOTE: alpha is not yet used
         public Std.ColorRGBAMsg[] colors;
+        //  Texture resource is a special URI that can either reference a texture file in
+        //  a format acceptable to (resource retriever)[https://index.ros.org/p/resource_retriever/]
+        //  or an embedded texture via a string matching the format:
+        //    "embedded://texture_name"
+        public string texture_resource;
+        //  An image to be loaded into the rendering engine as the texture for this marker.
+        //  This will be used iff texture_resource is set to embedded.
+        public Sensor.CompressedImageMsg texture;
+        //  Location of each vertex within the texture; in the range: [0.0-1.0]
+        public UVCoordinateMsg[] uv_coordinates;
         //  Only used for text markers
         public string text;
         //  Only used for MESH_RESOURCE markers.
+        //  Similar to texture_resource, mesh_resource uses resource retriever to load a mesh.
+        //  Optionally, a mesh file can be sent in-message via the mesh_file field. If doing so,
+        //  use the following format for mesh_resource:
+        //    "embedded://mesh_name"
         public string mesh_resource;
+        public MeshFileMsg mesh_file;
         public bool mesh_use_embedded_materials;
 
         public MarkerMsg()
@@ -86,12 +101,16 @@ namespace RosMessageTypes.Visualization
             this.frame_locked = false;
             this.points = new Geometry.PointMsg[0];
             this.colors = new Std.ColorRGBAMsg[0];
+            this.texture_resource = "";
+            this.texture = new Sensor.CompressedImageMsg();
+            this.uv_coordinates = new UVCoordinateMsg[0];
             this.text = "";
             this.mesh_resource = "";
+            this.mesh_file = new MeshFileMsg();
             this.mesh_use_embedded_materials = false;
         }
 
-        public MarkerMsg(Std.HeaderMsg header, string ns, int id, int type, int action, Geometry.PoseMsg pose, Geometry.Vector3Msg scale, Std.ColorRGBAMsg color, BuiltinInterfaces.DurationMsg lifetime, bool frame_locked, Geometry.PointMsg[] points, Std.ColorRGBAMsg[] colors, string text, string mesh_resource, bool mesh_use_embedded_materials)
+        public MarkerMsg(Std.HeaderMsg header, string ns, int id, int type, int action, Geometry.PoseMsg pose, Geometry.Vector3Msg scale, Std.ColorRGBAMsg color, BuiltinInterfaces.DurationMsg lifetime, bool frame_locked, Geometry.PointMsg[] points, Std.ColorRGBAMsg[] colors, string texture_resource, Sensor.CompressedImageMsg texture, UVCoordinateMsg[] uv_coordinates, string text, string mesh_resource, MeshFileMsg mesh_file, bool mesh_use_embedded_materials)
         {
             this.header = header;
             this.ns = ns;
@@ -105,8 +124,12 @@ namespace RosMessageTypes.Visualization
             this.frame_locked = frame_locked;
             this.points = points;
             this.colors = colors;
+            this.texture_resource = texture_resource;
+            this.texture = texture;
+            this.uv_coordinates = uv_coordinates;
             this.text = text;
             this.mesh_resource = mesh_resource;
+            this.mesh_file = mesh_file;
             this.mesh_use_embedded_materials = mesh_use_embedded_materials;
         }
 
@@ -126,8 +149,12 @@ namespace RosMessageTypes.Visualization
             deserializer.Read(out this.frame_locked);
             deserializer.Read(out this.points, Geometry.PointMsg.Deserialize, deserializer.ReadLength());
             deserializer.Read(out this.colors, Std.ColorRGBAMsg.Deserialize, deserializer.ReadLength());
+            deserializer.Read(out this.texture_resource);
+            this.texture = Sensor.CompressedImageMsg.Deserialize(deserializer);
+            deserializer.Read(out this.uv_coordinates, UVCoordinateMsg.Deserialize, deserializer.ReadLength());
             deserializer.Read(out this.text);
             deserializer.Read(out this.mesh_resource);
+            this.mesh_file = MeshFileMsg.Deserialize(deserializer);
             deserializer.Read(out this.mesh_use_embedded_materials);
         }
 
@@ -147,8 +174,13 @@ namespace RosMessageTypes.Visualization
             serializer.Write(this.points);
             serializer.WriteLength(this.colors);
             serializer.Write(this.colors);
+            serializer.Write(this.texture_resource);
+            serializer.Write(this.texture);
+            serializer.WriteLength(this.uv_coordinates);
+            serializer.Write(this.uv_coordinates);
             serializer.Write(this.text);
             serializer.Write(this.mesh_resource);
+            serializer.Write(this.mesh_file);
             serializer.Write(this.mesh_use_embedded_materials);
         }
 
@@ -167,8 +199,12 @@ namespace RosMessageTypes.Visualization
             "\nframe_locked: " + frame_locked.ToString() +
             "\npoints: " + System.String.Join(", ", points.ToList()) +
             "\ncolors: " + System.String.Join(", ", colors.ToList()) +
+            "\ntexture_resource: " + texture_resource.ToString() +
+            "\ntexture: " + texture.ToString() +
+            "\nuv_coordinates: " + System.String.Join(", ", uv_coordinates.ToList()) +
             "\ntext: " + text.ToString() +
             "\nmesh_resource: " + mesh_resource.ToString() +
+            "\nmesh_file: " + mesh_file.ToString() +
             "\nmesh_use_embedded_materials: " + mesh_use_embedded_materials.ToString();
         }
 
