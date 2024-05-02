@@ -9,16 +9,13 @@ namespace Unity.Robotics.ROSTCPConnector
     public class TaskPauser
     {
         CancellationTokenSource m_Source = new CancellationTokenSource();
-        public object Result { get; private set; }
+        public object Result { get; private set; } = null;
 
         public async Task<object> PauseUntilResumed()
         {
             try
             {
-                while (!m_Source.Token.IsCancellationRequested)
-                {
-                    await Task.Delay(10000, m_Source.Token);
-                }
+                await Task.Delay(10000, m_Source.Token);
             }
             catch (TaskCanceledException)
             {
