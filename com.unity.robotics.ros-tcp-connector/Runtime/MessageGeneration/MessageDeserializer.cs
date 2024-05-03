@@ -134,6 +134,7 @@ namespace Unity.Robotics.ROSTCPConnector.MessageGeneration
         public void Read(out string value)
         {
             var length = ReadLength();
+            value = string.Empty;
 
 #if !ROS2
             value = System.Text.Encoding.UTF8.GetString(data, offset, length);
