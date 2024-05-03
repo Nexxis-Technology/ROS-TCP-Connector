@@ -59,16 +59,8 @@ namespace Unity.Robotics.ROSTCPConnector.MessageGeneration
 
         public void Read(out bool value)
         {
-            value = false;
-            try
-            {
-                value = BitConverter.ToBoolean(data, offset);
-                offset += sizeof(bool);
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"Error deserializing ROS2 bool field: {e.Message}");
-            }
+            value = BitConverter.ToBoolean(data, offset);
+            offset += sizeof(bool);
         }
 
         public void Read(out byte value)
@@ -141,10 +133,7 @@ namespace Unity.Robotics.ROSTCPConnector.MessageGeneration
 
         public void Read(out string value)
         {
-            value = string.Empty;
             var length = ReadLength();
-
-            if (length < 1) { return; }
 
 #if !ROS2
             value = System.Text.Encoding.UTF8.GetString(data, offset, length);
