@@ -90,7 +90,7 @@ namespace Unity.Robotics.ROSTCPConnector
 
         OutgoingMessageQueue m_OutgoingMessageQueue = new OutgoingMessageQueue();
 
-        ConcurrentDictionary<string, byte[]> m_IncomingMessages = new();
+        ConcurrentQueue<Tuple<string, byte[]>> m_IncomingMessages = new ConcurrentQueue<Tuple<string, byte[]>>();
         CancellationTokenSource m_ConnectionThreadCancellation;
         public bool HasConnectionThread => m_ConnectionThreadCancellation != null;
 
@@ -283,12 +283,7 @@ namespace Unity.Robotics.ROSTCPConnector
         // Send a request to a ros service
         public async void SendServiceMessage<RESPONSE>(string rosServiceName, Message serviceRequest, Action<RESPONSE> callback) where RESPONSE : Message, new()
         {
-            (bool success, RESPONSE response) = await SendServiceMessage<RESPONSE>(rosServiceName, serviceRequest);
-            if (!success)
-            {
-                Debug.LogError($"No response from service {rosServiceName}");
-            }
-
+            RESPONSE response = await SendServiceMessage<RESPONSE>(rosServiceName, serviceRequest);
             try
             {
                 callback(response);
@@ -300,14 +295,11 @@ namespace Unity.Robotics.ROSTCPConnector
         }
 
         // Send a request to a ros service
-        public async Task<(bool success, RESPONSE response)> SendServiceMessage<RESPONSE>(string rosServiceName, Message serviceRequest) where RESPONSE : Message, new()
+        public async Task<RESPONSE> SendServiceMessage<RESPONSE>(string rosServiceName, Message serviceRequest) where RESPONSE : Message, new()
         {
             m_MessageSerializer.Clear();
             m_MessageSerializer.SerializeMessage(serviceRequest);
             byte[] requestBytes = m_MessageSerializer.GetBytes();
-
-            bool success = false;
-            RESPONSE response = new RESPONSE();
             TaskPauser pauser = new TaskPauser();
 
             int srvID;
@@ -320,17 +312,11 @@ namespace Unity.Robotics.ROSTCPConnector
             RosTopicState topicState = GetOrCreateTopic(rosServiceName, serviceRequest.RosMessageName, isService: true);
             topicState.SendServiceRequest(serviceRequest, srvID);
 
-            var receivedData = await pauser.PauseUntilResumed();
+            byte[] rawResponse = (byte[])await pauser.PauseUntilResumed();
 
-            if (receivedData != null)
-            {
-                byte[] rawResponse = (byte[])receivedData;
-                topicState.OnMessageReceived(rawResponse);
-                response = m_MessageDeserializer.DeserializeMessage<RESPONSE>(rawResponse);
-                success = true;
-            }
-
-            return (success, response);
+            topicState.OnMessageReceived(rawResponse);
+            RESPONSE result = m_MessageDeserializer.DeserializeMessage<RESPONSE>(rawResponse);
+            return result;
         }
 
         public void GetTopicList(Action<string[]> callback)
@@ -586,41 +572,38 @@ namespace Unity.Robotics.ROSTCPConnector
         {
             s_RealTimeSinceStartup = Time.realtimeSinceStartup;
 
-            var messageKeysReceived = m_IncomingMessages.Keys;
-
-            foreach (var key in messageKeysReceived)
+            Tuple<string, byte[]> data;
+            while (m_IncomingMessages.TryDequeue(out data))
             {
-                if (m_IncomingMessages.TryRemove(key, out var value))
+                (string topic, byte[] contents) = data;
+                m_LastMessageReceivedRealtime = Time.realtimeSinceStartup;
+
+                if (m_SpecialIncomingMessageHandler != null)
                 {
-                    m_LastMessageReceivedRealtime = Time.realtimeSinceStartup;
-
-                    if (m_SpecialIncomingMessageHandler != null)
+                    m_SpecialIncomingMessageHandler(topic, contents);
+                }
+                else if (topic.StartsWith("__"))
+                {
+                    ReceiveSysCommand(topic, Encoding.UTF8.GetString(contents));
+                }
+                else
+                {
+                    RosTopicState topicInfo = GetTopic(topic);
+                    // if this is null, we have received a message on a topic we've never heard of...!?
+                    // all we can do is ignore it, we don't even know what type it is
+                    if (topicInfo != null)
                     {
-                        m_SpecialIncomingMessageHandler(key, value);
-                    }
-                    else if (key.StartsWith("__"))
-                    {
-                        ReceiveSysCommand(key, Encoding.UTF8.GetString(value));
-                    }
-                    else
-                    {
-                        RosTopicState topicInfo = GetTopic(key);
-                        // if this is null, we have received a message on a topic we've never heard of...!?
-                        // all we can do is ignore it, we don't even know what type it is
-                        if (topicInfo != null)
+                        try
                         {
-                            try
-                            {
-                                //Add a try catch so that bad logic from one received message doesn't
-                                //cause the Update method to exit without processing other received messages.
-                                topicInfo.OnMessageReceived(value);
-                            }
-                            catch (Exception e)
-                            {
-                                Debug.LogException(e);
-                            }
-
+                            //Add a try catch so that bad logic from one received message doesn't
+                            //cause the Update method to exit without processing other received messages.
+                            topicInfo.OnMessageReceived(contents);
                         }
+                        catch (Exception e)
+                        {
+                            Debug.LogException(e);
+                        }
+
                     }
                 }
             }
@@ -786,7 +769,7 @@ namespace Unity.Robotics.ROSTCPConnector
             Action<NetworkStream> OnConnectionStartedCallback,
             Action DeregisterAll,
             OutgoingMessageQueue outgoingQueue,
-            ConcurrentDictionary<string, byte[]> incomingDictionary,
+            ConcurrentQueue<Tuple<string, byte[]>> incomingQueue,
             CancellationToken token)
         {
             //Debug.Log("ConnectionThread begins");
@@ -813,7 +796,7 @@ namespace Unity.Robotics.ROSTCPConnector
                     OnConnectionStartedCallback(networkStream);
 
                     readerCancellation = new CancellationTokenSource();
-                    _ = Task.Run(() => ReaderThread(nextReaderIdx, networkStream, incomingDictionary, sleepMilliseconds, readerCancellation.Token));
+                    _ = Task.Run(() => ReaderThread(nextReaderIdx, networkStream, incomingQueue, sleepMilliseconds, readerCancellation.Token));
                     nextReaderIdx++;
 
                     // connected, now just watch our queue for outgoing messages to send (or else send a keepalive message occasionally)
@@ -887,14 +870,14 @@ namespace Unity.Robotics.ROSTCPConnector
             }
         }
 
-        static async Task ReaderThread(int readerIdx, NetworkStream networkStream, ConcurrentDictionary<string, byte[]> dictionary, int sleepMilliseconds, CancellationToken token)
+        static async Task ReaderThread(int readerIdx, NetworkStream networkStream, ConcurrentQueue<Tuple<string, byte[]>> queue, int sleepMilliseconds, CancellationToken token)
         {
             // First message should be the handshake
             Tuple<string, byte[]> handshakeContent = await ReadMessageContents(networkStream, sleepMilliseconds, token);
             if (handshakeContent.Item1 == SysCommand.k_SysCommand_Handshake)
             {
                 ROSConnection.m_HasConnectionError = false;
-                dictionary[handshakeContent.Item1] = handshakeContent.Item2;
+                queue.Enqueue(handshakeContent);
             }
             else
             {
@@ -908,11 +891,8 @@ namespace Unity.Robotics.ROSTCPConnector
                     Tuple<string, byte[]> content = await ReadMessageContents(networkStream, sleepMilliseconds, token);
                     ROSConnection.m_HasConnectionError = false;
 
-                    // ignore keepalive messages
-                    if (content.Item1 != "")
-                    {
-                        dictionary[content.Item1] = content.Item2;
-                    }
+                    if (content.Item1 != "") // ignore keepalive messages
+                        queue.Enqueue(content);
                 }
                 catch (OperationCanceledException)
                 {
