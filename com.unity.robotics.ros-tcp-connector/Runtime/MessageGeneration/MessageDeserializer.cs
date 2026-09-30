@@ -134,20 +134,11 @@ namespace Unity.Robotics.ROSTCPConnector.MessageGeneration
         public void Read(out string value)
         {
             var length = ReadLength();
-            value = string.Empty;
-
 #if !ROS2
             value = System.Text.Encoding.UTF8.GetString(data, offset, length);
 #else
-            try
-            {
-                // ROS2 strings have a null byte at the end
-                value = System.Text.Encoding.UTF8.GetString(data, offset, length - 1);
-            }
-            catch (Exception e)
-            {
-                Debug.LogError($"Deserialization of string ROS2 field: {e.Message}");
-            }
+            // ROS2 strings have a null byte at the end
+            value = System.Text.Encoding.UTF8.GetString(data, offset, length - 1);
 #endif
             offset += length;
         }
